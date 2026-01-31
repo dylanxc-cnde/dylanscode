@@ -133,6 +133,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    /* nothing to do in main loop; response wird im Rx-IRQ gesendet */
 
     /* USER CODE END WHILE */
 

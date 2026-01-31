@@ -76,6 +76,35 @@ uint8_t             RxData[8];
 uint8_t Hello[] = "Hello!\n";
 // uint32_t            TxMailbox;
 
+/* EZ DEBUG: ring buffer for RX frames */
+#define RB_SIZE 16
+typedef struct {
+  uint32_t id;
+  uint8_t dlc;
+  uint8_t data[8];
+} CanFrame;
+
+static volatile uint16_t rb_head = 0;
+static volatile uint16_t rb_tail = 0;
+static volatile uint16_t rb_count = 0;
+static CanFrame rb[RB_SIZE];
+
+static void rb_push(const FDCAN_RxHeaderTypeDef *hdr, const uint8_t *data)
+{
+  uint16_t next = (uint16_t)((rb_head + 1U) % RB_SIZE);
+  if (rb_count == RB_SIZE) {
+    rb_tail = next; /* drop oldest */
+    rb_count--;
+  }
+  rb[rb_head].id = hdr->Identifier;
+  rb[rb_head].dlc = (uint8_t)hdr->DataLength;
+  for (int i = 0; i < 8; i++) {
+    rb[rb_head].data[i] = data[i];
+  }
+  rb_head = next;
+  rb_count++;
+}
+
  void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
  {
    if (GPIO_Pin == GPIO_PIN_13)
@@ -106,6 +135,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     }
     else
     {
+      rb_push(&RxHeader, RxData);
       printf("Received ID: 0x%03lX ", RxHeader.Identifier);
       if (RxHeader.DataLength == FDCAN_DLC_BYTES_8)
       {
@@ -166,9 +196,8 @@ int main(void)
   TxHeader.TxFrameType = FDCAN_DATA_FRAME;
   TxHeader.DataLength = FDCAN_DLC_BYTES_8;
   TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
-  TxHeader.FDFormat = FDCAN_FD_CAN;
   TxHeader.BitRateSwitch = FDCAN_BRS_ON;
+  TxHeader.FDFormat = FDCAN_FD_CAN;
   TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
   TxHeader.MessageMarker = 0;
 

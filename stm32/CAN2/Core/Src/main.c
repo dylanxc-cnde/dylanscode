@@ -74,6 +74,29 @@ uint8_t             RxData[8];
 
 uint32_t            TxMailbox;
 
+void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
+{
+  if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0U)
+  {
+    if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
+    {
+      Error_Handler();
+    }
+    else
+    {
+      /* Echo back to CAN1 with ID 0x447 */
+      for (int i = 0; i < 8; i++) {
+        TxData[i] = RxData[i];
+      }
+      TxHeader.DataLength = RxHeader.DataLength;
+      if (HAL_FDCAN_AddMessageToTxFifoQ(hfdcan, &TxHeader, TxData) != HAL_OK)
+      {
+        Error_Handler();
+      }
+    }
+  }
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -110,6 +133,18 @@ int main(void)
 
   HAL_FDCAN_Start(&hfdcan1);
 
+  HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, FDCAN_RX_FIFO0);
+
+  TxHeader.Identifier = 0x447;
+  TxHeader.IdType = FDCAN_STANDARD_ID;
+  TxHeader.TxFrameType = FDCAN_DATA_FRAME;
+  TxHeader.DataLength = FDCAN_DLC_BYTES_8;
+  TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+  TxHeader.BitRateSwitch = FDCAN_BRS_ON;
+  TxHeader.FDFormat = FDCAN_FD_CAN;
+  TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+  TxHeader.MessageMarker = 0;
+
   /* USER CODE END 2 */
 
   /* Initialize leds */
@@ -133,7 +168,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* nothing to do in main loop; response wird im Rx-IRQ gesendet */
+    /* idle */
 
     /* USER CODE END WHILE */
 
@@ -217,7 +252,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.DataSyncJumpWidth = 1;
   hfdcan1.Init.DataTimeSeg1 = 15;
   hfdcan1.Init.DataTimeSeg2 = 4;
-  hfdcan1.Init.StdFiltersNbr = 0;
+  hfdcan1.Init.StdFiltersNbr = 3;
   hfdcan1.Init.ExtFiltersNbr = 0;
   hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
@@ -225,6 +260,16 @@ static void MX_FDCAN1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN FDCAN1_Init 2 */
+
+  FDCAN_FilterTypeDef  canFilterConfig;
+
+  canFilterConfig.IdType = FDCAN_STANDARD_ID;
+  canFilterConfig.FilterIndex = 0;
+  canFilterConfig.FilterType = FDCAN_FILTER_MASK;
+  canFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+  canFilterConfig.FilterID1 = 0x446;
+  canFilterConfig.FilterID2 = 0x7FF;
+  HAL_FDCAN_ConfigFilter(&hfdcan1, &canFilterConfig);
 
   /* USER CODE END FDCAN1_Init 2 */
 

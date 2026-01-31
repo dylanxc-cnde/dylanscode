@@ -72,7 +72,7 @@ FDCAN_RxHeaderTypeDef   RxHeader;
 uint8_t             TxData[8];
 uint8_t             RxData[8];
 
-uint32_t            TxMailbox;
+// uint32_t            TxMailbox;
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {

@@ -105,23 +105,8 @@ static void rb_push(const FDCAN_RxHeaderTypeDef *hdr, const uint8_t *data)
   rb_count++;
 }
 
- void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
- {
-   if (GPIO_Pin == GPIO_PIN_13)
-   {
-     /* Prepare Tx message */
-     for (int i = 0; i < 8; i++) {
-       TxData[i] = Hello[i];
-     }
-
-     /* Start FDCAN transmission */
-     if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData) != HAL_OK)
-     {
-       /* Transmission request Error */
-       Error_Handler();
-     }
-   }
- }
+/* Button state for edge detection in main loop */
+static uint32_t button_prev_state = 0;
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
@@ -185,7 +170,7 @@ int main(void)
   MX_GPIO_Init();
   MX_FDCAN1_Init();
   /* USER CODE BEGIN 2 */
-
+  printf("CANSTART!\n");
   HAL_FDCAN_Start(&hfdcan1);
 
   // HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_TX_COMPLETE, 0);
@@ -225,6 +210,25 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    /* Poll button state for falling edge (button pressed) */
+    uint32_t button_state = BSP_PB_GetState(BUTTON_USER);
+    if (button_prev_state == 1 && button_state == 0)
+    {
+      printf("Button pressed!\n");
+      /* Prepare Tx message */
+      for (int i = 0; i < 8; i++) {
+        TxData[i] = Hello[i];
+      }
+
+      /* Start FDCAN transmission */
+      if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData) != HAL_OK)
+      {
+        /* Transmission request Error */
+        Error_Handler();
+      }
+    }
+    button_prev_state = button_state;
+
     if (datacheck == 1)
     {
       HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);

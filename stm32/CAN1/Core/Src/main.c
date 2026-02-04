@@ -217,8 +217,22 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint32_t last_status_print = 0;
   while (1)
   {
+    /* Print CAN bus status every 2 seconds */
+    if (HAL_GetTick() - last_status_print > 2000)
+    {
+      FDCAN_ProtocolStatusTypeDef psr;
+      FDCAN_ErrorCountersTypeDef err;
+      HAL_FDCAN_GetProtocolStatus(&hfdcan1, &psr);
+      HAL_FDCAN_GetErrorCounters(&hfdcan1, &err);
+      printf("CAN: BusOff=%d ErrPass=%d Warn=%d TEC=%u REC=%u LastErr=%d\n",
+             psr.BusOff, psr.ErrorPassive, psr.Warning,
+             (unsigned)err.TxErrorCnt, (unsigned)err.RxErrorCnt, psr.LastErrorCode);
+      last_status_print = HAL_GetTick();
+    }
+
     /* Poll button state for falling edge (button pressed) */
     uint32_t button_state = BSP_PB_GetState(BUTTON_USER);
     if (button_prev_state == 1 && button_state == 0)
@@ -236,7 +250,7 @@ int main(void)
     	  printf("Message failed!\n");
         Error_Handler();
       } else {
-        // printf("Message transmitted!\n");
+        printf("Message queued!\n");
       }
     }
     button_prev_state = button_state;

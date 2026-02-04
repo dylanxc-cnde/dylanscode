@@ -2,8 +2,10 @@
 ../Core/Src/main.c:49:5:_write	2
 ../Core/Src/main.c:92:13:rb_push	3
 ../Core/Src/main.c:111:6:HAL_FDCAN_RxFifo0Callback	5
-../Core/Src/main.c:146:5:main	7
-../Core/Src/main.c:248:6:SystemClock_Config	3
-../Core/Src/main.c:294:13:MX_FDCAN1_Init	2
-../Core/Src/main.c:348:13:MX_GPIO_Init	1
-../Core/Src/main.c:373:6:Error_Handler	1
+../Core/Src/main.c:139:6:HAL_FDCAN_TxFifoEmptyCallback	1
+../Core/Src/main.c:144:6:HAL_FDCAN_TxBufferCompleteCallback	1
+../Core/Src/main.c:155:5:main	7
+../Core/Src/main.c:260:6:SystemClock_Config	3
+../Core/Src/main.c:306:13:MX_FDCAN1_Init	2
+../Core/Src/main.c:360:13:MX_GPIO_Init	1
+../Core/Src/main.c:385:6:Error_Handler	1

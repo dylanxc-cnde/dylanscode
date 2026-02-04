@@ -46,37 +46,25 @@ COM_InitTypeDef BspCOMInit;
 FDCAN_HandleTypeDef hfdcan1;
 
 /* USER CODE BEGIN PV */
+/* ITM printf redirect */
 int _write(int file, char *ptr, int len) {
-	int DataIdx;
-	for (DataIdx = 0; DataIdx < len; DataIdx++) {
-		ITM_SendChar(*ptr++);
-	}
-	return len;
+  for (int i = 0; i < len; i++) {
+    ITM_SendChar(*ptr++);
+  }
+  return len;
 }
-/* USER CODE END PV */
 
-/* Private function prototypes -----------------------------------------------*/
-void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
-static void MX_FDCAN1_Init(void);
-/* USER CODE BEGIN PFP */
+/* CAN variables */
+FDCAN_TxHeaderTypeDef TxHeader;
+FDCAN_RxHeaderTypeDef RxHeader;
+uint8_t TxData[8] = "Hello!\n";
+uint8_t RxData[8];
 
-/* USER CODE END PFP */
+/* Flags for main loop processing (set in ISR, processed in main) */
+volatile uint8_t rxFlag = 0;
+volatile uint8_t txFlag = 0;
 
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
-
-FDCAN_TxHeaderTypeDef   TxHeader;
-FDCAN_RxHeaderTypeDef   RxHeader;
-
-volatile int datacheck = 0;  //flag
-
-uint8_t             TxData[8];
-uint8_t             RxData[8];
-uint8_t Hello[] = "Hello!\n";
-// uint32_t            TxMailbox;
-
-/* EZ DEBUG: ring buffer for RX frames */
+/* Ring buffer for RX frames */
 #define RB_SIZE 16
 typedef struct {
   uint32_t id;
@@ -104,48 +92,35 @@ static void rb_push(const FDCAN_RxHeaderTypeDef *hdr, const uint8_t *data)
   rb_head = next;
   rb_count++;
 }
+/* USER CODE END PV */
 
-/* Button state for edge detection in main loop */
-static uint32_t button_prev_state = 0;
+/* Private function prototypes -----------------------------------------------*/
+void SystemClock_Config(void);
+static void MX_GPIO_Init(void);
+static void MX_FDCAN1_Init(void);
+/* USER CODE BEGIN PFP */
 
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+/* Callbacks - minimal work in ISR, set flags for main loop */
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
-  if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0U)
+  if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0)
   {
-    /* Retrieve Rx message */
-    if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
-    {
-      /* Reception Error */
-      Error_Handler();
-    }
-    else
+    if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK)
     {
       rb_push(&RxHeader, RxData);
-      printf("Received ID: 0x%03lX ", RxHeader.Identifier);
-      if (RxHeader.DataLength == FDCAN_DLC_BYTES_8)
-      {
-        datacheck = 1;
-        printf("Received message: ");
-        for (int i = 0; i < 8; i++) 
-        {
-          printf("%c", RxData[i]);
-        }
-      }
-      printf("\n");
+      rxFlag = 1;
     }
   }
 }
 
-void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
-{
-  printf("tx Empty!\n");
-}
-
 void HAL_FDCAN_TxBufferCompleteCallback(FDCAN_HandleTypeDef *hfdcan, uint32_t BufferIdx)
 {
-  printf("tx Complete!\n");
+  txFlag = 1;
 }
-
 /* USER CODE END 0 */
 
 /**
@@ -179,13 +154,27 @@ int main(void)
   MX_GPIO_Init();
   MX_FDCAN1_Init();
   /* USER CODE BEGIN 2 */
-  printf("CANSTART!\n");
-  HAL_FDCAN_Start(&hfdcan1);
 
-  HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_TX_COMPLETE, FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2);
-  HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_TX_FIFO_EMPTY, 0);
-  HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, FDCAN_RX_FIFO0);
-  TxHeader.Identifier = 0x446;
+  /*==========================================================================
+   * CAN CONFIGURATION
+   *==========================================================================*/
+
+  /* RX Filter: Accept messages with ID 0x446 (for loopback test, use same as TX) */
+  FDCAN_FilterTypeDef filterConfig;
+  filterConfig.IdType = FDCAN_STANDARD_ID;
+  filterConfig.FilterIndex = 0;
+  filterConfig.FilterType = FDCAN_FILTER_MASK;
+  filterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+  filterConfig.FilterID1 = 0x446;   /* ID to accept */
+  filterConfig.FilterID2 = 0x7FF;   /* Mask: exact match */
+  HAL_FDCAN_ConfigFilter(&hfdcan1, &filterConfig);
+
+  /* Global filter: reject non-matching frames */
+  HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_REJECT, FDCAN_REJECT,
+                                FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE);
+
+  /* TX Header configuration */
+  TxHeader.Identifier = 0x446;      /* TX ID (same as filter for loopback) */
   TxHeader.IdType = FDCAN_STANDARD_ID;
   TxHeader.TxFrameType = FDCAN_DATA_FRAME;
   TxHeader.DataLength = FDCAN_DLC_BYTES_8;
@@ -195,6 +184,18 @@ int main(void)
   TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
   TxHeader.MessageMarker = 0;
 
+  /*==========================================================================*/
+
+  /* Start FDCAN */
+  HAL_FDCAN_Start(&hfdcan1);
+
+  /* Activate notifications */
+  HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
+  HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_TX_COMPLETE,
+                                  FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2);
+
+  printf("CAN1 Internal Loopback Test Ready!\r\n");
+  printf("Press button to send message...\r\n");
 
   /* USER CODE END 2 */
 
@@ -217,48 +218,43 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint32_t last_status_print = 0;
+  uint32_t button_prev = 0;
   while (1)
   {
-    /* Print CAN bus status every 2 seconds */
-    if (HAL_GetTick() - last_status_print > 2000)
-    {
-      FDCAN_ProtocolStatusTypeDef psr;
-      FDCAN_ErrorCountersTypeDef err;
-      HAL_FDCAN_GetProtocolStatus(&hfdcan1, &psr);
-      HAL_FDCAN_GetErrorCounters(&hfdcan1, &err);
-      printf("CAN: BusOff=%d ErrPass=%d Warn=%d TEC=%u REC=%u LastErr=%d\n",
-             psr.BusOff, psr.ErrorPassive, psr.Warning,
-             (unsigned)err.TxErrorCnt, (unsigned)err.RxErrorCnt, psr.LastErrorCode);
-      last_status_print = HAL_GetTick();
-    }
-
-    /* Poll button state for falling edge (button pressed) */
+    /* Button pressed - send CAN message */
     uint32_t button_state = BSP_PB_GetState(BUTTON_USER);
-    if (button_prev_state == 1 && button_state == 0)
+    if (button_prev == 1 && button_state == 0)
     {
-      printf("Button pressed!\n");
-      /* Prepare Tx message */
-      for (int i = 0; i < 8; i++) {
-        TxData[i] = Hello[i];
-      }
-
-      /* Start FDCAN transmission */
-      if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData) != HAL_OK)
+      if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData) == HAL_OK)
       {
-        /* Transmission request Error */
-    	  printf("Message failed!\n");
-        Error_Handler();
-      } else {
-        printf("Message queued!\n");
+        printf("TX: ID=0x%03lX Data=%s\r\n", TxHeader.Identifier, TxData);
+      }
+      else
+      {
+        printf("TX Failed!\r\n");
       }
     }
-    button_prev_state = button_state;
+    button_prev = button_state;
 
-    if (datacheck == 1)
+    /* TX complete - processed in main loop */
+    if (txFlag)
     {
-      HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-      datacheck = 0;
+      txFlag = 0;
+      printf("TX Complete!\r\n");
+    }
+
+    /* RX received - processed in main loop */
+    if (rxFlag)
+    {
+      rxFlag = 0;
+      printf("RX: ID=0x%03lX Data=", RxHeader.Identifier);
+      for (int i = 0; i < 8; i++)
+      {
+        printf("%c", RxData[i]);
+      }
+      printf("\r\n");
+      printf("*** LOOPBACK SUCCESS! ***\r\n");
+      BSP_LED_Toggle(LED_GREEN);
     }
     /* USER CODE END WHILE */
 
@@ -330,19 +326,19 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Instance = FDCAN1;
   hfdcan1.Init.ClockDivider = FDCAN_CLOCK_DIV1;
   hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
-  hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
+  hfdcan1.Init.Mode = FDCAN_MODE_INTERNAL_LOOPBACK;
   hfdcan1.Init.AutoRetransmission = DISABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
-  hfdcan1.Init.NominalPrescaler = 17;
+  hfdcan1.Init.NominalPrescaler = 34;
   hfdcan1.Init.NominalSyncJumpWidth = 1;
-  hfdcan1.Init.NominalTimeSeg1 = 15;
-  hfdcan1.Init.NominalTimeSeg2 = 4;
+  hfdcan1.Init.NominalTimeSeg1 = 8;
+  hfdcan1.Init.NominalTimeSeg2 = 1;
   hfdcan1.Init.DataPrescaler = 17;
   hfdcan1.Init.DataSyncJumpWidth = 1;
   hfdcan1.Init.DataTimeSeg1 = 15;
   hfdcan1.Init.DataTimeSeg2 = 4;
-  hfdcan1.Init.StdFiltersNbr = 3;
+  hfdcan1.Init.StdFiltersNbr = 1;
   hfdcan1.Init.ExtFiltersNbr = 0;
   hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
@@ -350,18 +346,7 @@ static void MX_FDCAN1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN FDCAN1_Init 2 */
-
-  FDCAN_FilterTypeDef  canFilterConfig;
-
-  canFilterConfig.IdType = FDCAN_STANDARD_ID;
-  canFilterConfig.FilterIndex = 0;
-  canFilterConfig.FilterType = FDCAN_FILTER_MASK;
-  canFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-  canFilterConfig.FilterID1 = 0x447;
-  canFilterConfig.FilterID2 = 0x7FF;
-  HAL_FDCAN_ConfigFilter(&hfdcan1, &canFilterConfig);
-
-
+  /* Filter and TX header config moved to USER CODE BEGIN 2 for easy modification */
   /* USER CODE END FDCAN1_Init 2 */
 
 }

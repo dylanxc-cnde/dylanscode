@@ -65,6 +65,7 @@ volatile uint8_t rxFlag = 0;
 volatile uint8_t txFlag = 0;
 
 /* Ring buffer for RX frames */
+#if 0
 #define RB_SIZE 16
 typedef struct {
   uint32_t id;
@@ -92,6 +93,7 @@ static void rb_push(const FDCAN_RxHeaderTypeDef *hdr, const uint8_t *data)
   rb_head = next;
   rb_count++;
 }
+#endif
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -111,7 +113,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
   {
     if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK)
     {
-      rb_push(&RxHeader, RxData);
+      /* Ring buffer path disabled during direct TX/RX bring-up. */
       rxFlag = 1;
     }
   }
@@ -165,8 +167,8 @@ int main(void)
   filterConfig.FilterIndex = 0;
   filterConfig.FilterType = FDCAN_FILTER_MASK;
   filterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-  filterConfig.FilterID1 = 0x446;   /* ID to accept */
-  filterConfig.FilterID2 = 0x7FF;   /* Mask: exact match */
+  filterConfig.FilterID1 = 0x447;   /* ID to accept */
+  filterConfig.FilterID2 = 0x7FF;   /* Mask: match */
   HAL_FDCAN_ConfigFilter(&hfdcan1, &filterConfig);
 
   /* Global filter: reject non-matching frames */
@@ -194,8 +196,8 @@ int main(void)
   HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_TX_COMPLETE,
                                   FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2);
 
-  printf("CAN1 Internal Loopback Test Ready!\r\n");
-  printf("Press button to send message...\r\n");
+  printf("CAN1 Loopback Test Ready!\r\n");
+  printf("Auto send once per second...\r\n");
 
   /* USER CODE END 2 */
 
@@ -218,9 +220,9 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint32_t button_prev = 0;
   while (1)
   {
+#if 0
     /* Button pressed - send CAN message */
     uint32_t button_state = BSP_PB_GetState(BUTTON_USER);
     if (button_prev == 1 && button_state == 0)
@@ -235,6 +237,16 @@ int main(void)
       }
     }
     button_prev = button_state;
+#endif
+
+    if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData) == HAL_OK)
+    {
+      printf("TX: ID=0x%03lX Data=%s\r\n", TxHeader.Identifier, TxData);
+    }
+    else
+    {
+      printf("TX Failed!\r\n");
+    }
 
     /* TX complete - processed in main loop */
     if (txFlag)
@@ -259,6 +271,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    HAL_Delay(1000);
   }
   /* USER CODE END 3 */
 }
@@ -326,8 +339,8 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Instance = FDCAN1;
   hfdcan1.Init.ClockDivider = FDCAN_CLOCK_DIV1;
   hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
-  hfdcan1.Init.Mode = FDCAN_MODE_INTERNAL_LOOPBACK;
-  hfdcan1.Init.AutoRetransmission = DISABLE;
+  hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
+  hfdcan1.Init.AutoRetransmission = ENABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
   hfdcan1.Init.NominalPrescaler = 34;
@@ -340,7 +353,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.DataTimeSeg2 = 4;
   hfdcan1.Init.StdFiltersNbr = 1;
   hfdcan1.Init.ExtFiltersNbr = 0;
-  hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
+  hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_QUEUE_OPERATION;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
   {
     Error_Handler();
